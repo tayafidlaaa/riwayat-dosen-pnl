@@ -36,12 +36,12 @@
   let currentExportAbort = false;
   let cachedExportData = null;
 
-  // Helper: Deteksi URL API (Bekerja di Vercel, server.js port 3000, maupun XAMPP)
+  // Helper: Deteksi URL API (Bekerja di Vercel, server.js port 3000, maupun PHP / XAMPP)
   function getApiUrl(endpoint, params = {}) {
-    const isXampp = window.location.pathname.includes('/riwayat-dosen2') && window.location.port !== '3000';
-    if (isXampp) {
+    const isPhp = !window.location.hostname.includes('vercel.app') && window.location.port !== '3000';
+    if (isPhp) {
       if (endpoint === 'search') return `api.php?aksi=cari&keyword=${encodeURIComponent(params.q || '')}`;
-      if (endpoint === 'detail') return `api.php?aksi=profil&id=${encodeURIComponent(params.id || '')}`;
+      if (endpoint === 'detail') return `api.php?aksi=detail&id=${encodeURIComponent(params.id || '')}&nama=${encodeURIComponent(params.nama || '')}&nidn=${encodeURIComponent(params.nidn || '')}`;
       if (endpoint === 'dosen-pnl') return `api.php?aksi=dosen_pnl`;
     }
     const qs = new URLSearchParams(params).toString();
@@ -303,14 +303,28 @@
 
     try {
       // Step 1: Ambil daftar dosen PNL
-      const listResp = await fetch(getApiUrl('dosen-pnl'));
-      const listData = await listResp.json();
+      let allDosen = [];
+      try {
+        const listResp = await fetch(getApiUrl('dosen-pnl'));
+        const listData = await listResp.json();
+        if (listResp.ok && listData.data && listData.data.length > 0) {
+          allDosen = listData.data;
+        }
+      } catch (_) {}
 
-      if (!listResp.ok || listData.error) {
-        throw new Error(listData.error || 'Gagal memuat daftar dosen PNL');
+      if (!allDosen.length) {
+        try {
+          const fallbackResp = await fetch('dosen_pnl_parsed.json');
+          if (fallbackResp.ok) {
+            allDosen = await fallbackResp.json();
+          }
+        } catch (_) {}
       }
 
-      const allDosen = listData.data || [];
+      if (!allDosen || allDosen.length === 0) {
+        throw new Error('Gagal memuat daftar dosen PNL. Silakan coba lagi.');
+      }
+
       const total = allDosen.length;
       exportStatusCount.textContent = `0 / ${total} dosen`;
 
@@ -327,8 +341,8 @@
         exportStatusLog.textContent = `Memproses: ${chunk.map(c => c.nama).join(', ')}`;
 
         try {
-          const isXampp = window.location.pathname.includes('/riwayat-dosen2') && window.location.port !== '3000';
-          const batchUrl = isXampp ? 'api.php?aksi=batch_study' : '/api/batch-study';
+          const isPhp = !window.location.hostname.includes('vercel.app') && window.location.port !== '3000';
+          const batchUrl = isPhp ? 'api.php?aksi=batch_study' : '/api/batch-study';
 
           const batchResp = await fetch(batchUrl, {
             method: 'POST',
@@ -337,7 +351,7 @@
           });
 
           const batchJson = await batchResp.json();
-          if (batchJson && batchJson.data) {
+          if (batchJson && batchJson.data && batchJson.data.length > 0) {
             enrichedRows.push(...batchJson.data);
           } else {
             enrichedRows.push(...chunk.map(c => ({ ...c, status_pddikti: 'Tersedia' })));
@@ -392,14 +406,35 @@
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const fileName = `rekap-pendidikan-dosen-pnl-${dateStr}.xlsx`;
 
-    if (window.XLSX && window.XLSX.utils) {
-      const ws = window.XLSX.utils.json_to_sheet(formattedData);
-      const wb = window.XLSX.utils.book_new();
-      window.XLSX.utils.book_append_sheet(wb, ws, 'Rekap Dosen PNL');
-      window.XLSX.writeFile(wb, fileName);
-    } else {
-      downloadCsvFallback(formattedData, `rekap-pendidikan-dosen-pnl-${dateStr}.csv`);
+    try {
+      if (window.XLSX && window.XLSX.utils) {
+        const ws = window.XLSX.utils.json_to_sheet(formattedData);
+        ws['!cols'] = [
+          { wch: 6 },
+          { wch: 32 },
+          { wch: 14 },
+          { wch: 18 },
+          { wch: 32 },
+          { wch: 16 },
+          { wch: 32 },
+          { wch: 16 },
+          { wch: 32 },
+          { wch: 16 },
+          { wch: 30 },
+          { wch: 22 },
+          { wch: 12 },
+          { wch: 25 },
+        ];
+        const wb = window.XLSX.utils.book_new();
+        window.XLSX.utils.book_append_sheet(wb, ws, 'Rekap Dosen PNL');
+        window.XLSX.writeFile(wb, fileName);
+        return;
+      }
+    } catch (e) {
+      console.warn('XLSX export fallback to CSV:', e);
     }
+
+    downloadCsvFallback(formattedData, `rekap-pendidikan-dosen-pnl-${dateStr}.csv`);
   }
 
   function downloadCsvFallback(data, filename) {
