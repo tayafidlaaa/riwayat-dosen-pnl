@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 const API_ROOT = 'https://pddikti.kemdiktisaintek.go.id/api';
 
 const PDDIKTI_HEADERS = {
@@ -7,6 +10,40 @@ const PDDIKTI_HEADERS = {
   'Referer': 'https://pddikti.kemdiktisaintek.go.id/',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 };
+
+let localCache = null;
+function getCachedDosen(nidn, nama) {
+  if (!localCache) {
+    try {
+      const candidates = [
+        path.join(process.cwd(), 'cache_dosen.json'),
+        path.join(process.cwd(), 'api', 'cache_dosen.json'),
+        path.resolve('cache_dosen.json')
+      ];
+      for (const p of candidates) {
+        if (fs.existsSync(p)) {
+          localCache = JSON.parse(fs.readFileSync(p, 'utf8'));
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+  if (!localCache) return null;
+
+  if (nidn) {
+    const cleanNidn = nidn.replace(/\D/g, '');
+    if (localCache[`nidn_${cleanNidn}`]) {
+      return localCache[`nidn_${cleanNidn}`];
+    }
+  }
+  if (nama) {
+    const clean = nama.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (localCache[`nama_${clean}`]) {
+      return localCache[`nama_${clean}`];
+    }
+  }
+  return null;
+}
 
 function classifyDegree(jenjang) {
   const label = (jenjang || '').toUpperCase();
@@ -46,6 +83,29 @@ export default async function handler(req, res) {
 
   const results = await Promise.all(items.map(async (dosen) => {
     try {
+      const cleanNidn = (dosen.nidn || '').replace(/\D/g, '');
+      const cached = getCachedDosen(cleanNidn, dosen.nama);
+      if (cached && cached.pendidikan && cached.pendidikan.length > 0) {
+        const levels = { S1: { kampus: [], tahun: [] }, S2: { kampus: [], tahun: [] }, S3: { kampus: [], tahun: [] } };
+        for (const p of cached.pendidikan) {
+          const lvl = classifyDegree(p.jenjang);
+          if (lvl) {
+            if (p.pt) levels[lvl].kampus.push(p.pt);
+            if (p.tahun) levels[lvl].tahun.push(p.tahun);
+          }
+        }
+        return {
+          ...dosen,
+          s1_kampus: levels.S1.kampus.join(' | '),
+          s1_tahun: levels.S1.tahun.join(' | '),
+          s2_kampus: levels.S2.kampus.join(' | '),
+          s2_tahun: levels.S2.tahun.join(' | '),
+          s3_kampus: levels.S3.kampus.join(' | '),
+          s3_tahun: levels.S3.tahun.join(' | '),
+          status_pddikti: 'Riwayat tersedia (PDDikti)'
+        };
+      }
+
       let pddiktiId = dosen.id || null;
 
       // If ID not provided or is prefix, search by enc/all

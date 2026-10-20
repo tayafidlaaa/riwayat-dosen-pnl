@@ -1,12 +1,48 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 const API_ROOT = 'https://pddikti.kemdiktisaintek.go.id/api';
 
 const PDDIKTI_HEADERS = {
   'Accept': 'application/json, text/plain, */*',
-  'Content-Type': 'application/json',
   'Origin': 'https://pddikti.kemdiktisaintek.go.id',
   'Referer': 'https://pddikti.kemdiktisaintek.go.id/',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
 };
+
+let localCache = null;
+function getCachedDosen(nidn, nama) {
+  if (!localCache) {
+    try {
+      const candidates = [
+        path.join(process.cwd(), 'cache_dosen.json'),
+        path.join(process.cwd(), 'api', 'cache_dosen.json'),
+        path.resolve('cache_dosen.json')
+      ];
+      for (const p of candidates) {
+        if (fs.existsSync(p)) {
+          localCache = JSON.parse(fs.readFileSync(p, 'utf8'));
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+  if (!localCache) return null;
+
+  if (nidn) {
+    const cleanNidn = nidn.replace(/\D/g, '');
+    if (localCache[`nidn_${cleanNidn}`]) {
+      return localCache[`nidn_${cleanNidn}`];
+    }
+  }
+  if (nama) {
+    const clean = nama.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (localCache[`nama_${clean}`]) {
+      return localCache[`nama_${clean}`];
+    }
+  }
+  return null;
+}
 
 let cachedPnlList = null;
 let lastCacheTime = 0;
@@ -78,6 +114,23 @@ export default async function handler(req, res) {
 
   if (!id && !nidn && !nama) {
     return res.status(400).json({ error: 'Parameter dosen harus disertakan.' });
+  }
+
+  const cleanNidn = (id.startsWith('nidn_') ? id.replace('nidn_', '') : nidn).trim();
+  const cleanNama = (id.startsWith('nama_') ? decodeURIComponent(id.replace('nama_', '')) : nama).trim();
+
+  // 1. Cek dulu data cache resmi PDDikti yang sudah disimpan
+  const cached = getCachedDosen(cleanNidn, cleanNama);
+  if (cached && (cached.profile || (cached.pendidikan && cached.pendidikan.length > 0) || (cached.mengajar && Object.keys(cached.mengajar).length > 0))) {
+    res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=604800');
+    return res.status(200).json({
+      success: true,
+      profile: cached.profile,
+      pendidikan: cached.pendidikan || [],
+      mengajar: cached.mengajar || {},
+      total_mengajar: cached.total_mengajar || 0,
+      source: 'pddikti_cached'
+    });
   }
 
   // Jika ID berupa encrypted hash PDDikti langsung (panjang dan ada karakter '=')
