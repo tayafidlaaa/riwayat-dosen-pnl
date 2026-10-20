@@ -45,11 +45,11 @@ function getCachedDosen(nidn, nama) {
   return null;
 }
 
-function classifyDegree(jenjang) {
-  const label = (jenjang || '').toUpperCase();
+function classifyDegree(jenjang, gelar = '') {
+  const label = `${jenjang || ''} ${gelar || ''}`.toUpperCase();
   if (/(^|[^0-9])S\s*1([^0-9]|$)|SARJANA|DIPLOMA\s*(IV|4)|D\s*[-/]?\s*(IV|4)/i.test(label)) return 'S1';
   if (/(^|[^0-9])S\s*2([^0-9]|$)|MAGISTER|MASTER/i.test(label)) return 'S2';
-  if (/(^|[^0-9])S\s*3([^0-9]|$)|DOKTOR|DOCTOR/i.test(label)) return 'S3';
+  if (/(^|[^0-9])S\s*3([^0-9]|$)|DOKTOR|DOCTOR|PH\.?D/i.test(label)) return 'S3';
   return null;
 }
 
@@ -88,10 +88,12 @@ export default async function handler(req, res) {
       if (cached && cached.pendidikan && cached.pendidikan.length > 0) {
         const levels = { S1: { kampus: [], tahun: [] }, S2: { kampus: [], tahun: [] }, S3: { kampus: [], tahun: [] } };
         for (const p of cached.pendidikan) {
-          const lvl = classifyDegree(p.jenjang);
+          const lvl = classifyDegree(p.jenjang, p.gelar);
           if (lvl) {
-            if (p.pt) levels[lvl].kampus.push(p.pt);
-            if (p.tahun) levels[lvl].tahun.push(p.tahun);
+            const pt = (p.pt || '').trim();
+            const thn = String(p.tahun || '').trim();
+            if (pt && !levels[lvl].kampus.includes(pt)) levels[lvl].kampus.push(pt);
+            if (thn && !levels[lvl].tahun.includes(thn)) levels[lvl].tahun.push(thn);
           }
         }
         return {
@@ -102,7 +104,7 @@ export default async function handler(req, res) {
           s2_tahun: levels.S2.tahun.join(' | '),
           s3_kampus: levels.S3.kampus.join(' | '),
           s3_tahun: levels.S3.tahun.join(' | '),
-          status_pddikti: 'Riwayat tersedia (PDDikti)'
+          status_pddikti: 'Riwayat tersedia'
         };
       }
 

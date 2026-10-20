@@ -1,18 +1,42 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+function getLocalDosenList() {
+  const cands = [
+    path.join(process.cwd(), 'dosen_pnl_parsed.json'),
+    path.join(process.cwd(), 'api', 'dosen_pnl_parsed.json'),
+    path.resolve('dosen_pnl_parsed.json')
+  ];
+  for (const p of cands) {
+    if (fs.existsSync(p)) {
+      try {
+        const d = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (Array.isArray(d) && d.length > 0) return d;
+      } catch (_) {}
+    }
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
+  const local = getLocalDosenList();
+
   try {
     const resp = await fetch('https://data.pnl.ac.id/dosen/list', {
       headers: {
         'Accept': 'text/html,application/xhtml+xml',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
+      },
+      signal: AbortSignal.timeout(5000)
     });
 
     if (!resp.ok) {
+      if (local) return res.status(200).json({ success: true, total: local.length, data: local });
       return res.status(502).json({ error: 'Portal data PNL mengembalikan status HTTP ' + resp.status });
     }
 
@@ -43,9 +67,16 @@ export default async function handler(req, res) {
       }
     }
 
+    if (rows.length === 0 && local) {
+      return res.status(200).json({ success: true, total: local.length, data: local });
+    }
+
     res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=604800');
     return res.status(200).json({ success: true, total: rows.length, data: rows });
   } catch (e) {
+    if (local) {
+      return res.status(200).json({ success: true, total: local.length, data: local });
+    }
     return res.status(502).json({ error: 'Gagal mengambil daftar dosen PNL: ' + e.message });
   }
 }
