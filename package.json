@@ -1,0 +1,19 @@
+{
+  "name": "riwayat-dosen-pnl",
+  "version": "1.0.0",
+  "description": "Direktori & Riwayat Pendidikan Dosen Politeknik Negeri Lhokseumawe (PNL) siap hosting di Vercel",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "pddikti",
+    "dosen",
+    "pnl",
+    "vercel"
+  ],
+  "author": "",
+  "license": "ISC"
+}
